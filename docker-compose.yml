@@ -1,0 +1,60 @@
+services:
+  chat_postgres:
+    image: postgres:15-alpine
+    container_name: chat_postgres
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U chat_user -d chat_history']
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  chat_redis:
+    image: redis:7-alpine
+    container_name: chat_redis
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  nginx_balancer:
+    image: nginx:1.25-alpine
+    container_name: chat_nginx
+    ports:
+      - '8080:80'
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./src/client:/usr/share/nginx/html:ro
+    depends_on:
+      - ws_server
+
+  ws_server:
+    build:
+      context: ./src/server
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=chat_redis
+      - DB_HOST=postgres_db
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT}
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@chat_postgres:${DB_PORT}/${DB_NAME}?schema=public
+    depends_on:
+      chat_postgres:
+        condition: service_healthy
+      chat_redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
